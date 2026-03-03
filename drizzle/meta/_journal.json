@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1772448624108,
+      "tag": "0000_smooth_hemingway",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1772448829982,
+      "tag": "0001_freezing_carnage",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1772464184271,
+      "tag": "0002_shiny_emma_frost",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1772466983351,
+      "tag": "0003_redundant_the_hunter",
+      "breakpoints": true
+    }
+  ]
+}
