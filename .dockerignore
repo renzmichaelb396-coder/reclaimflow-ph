@@ -1,0 +1,61 @@
+# =============================================================================
+# ReclaimFlow PH — .dockerignore
+# Excludes files from the Docker build context to reduce image size and
+# prevent accidental inclusion of secrets or development artifacts.
+# =============================================================================
+
+# Dependencies (reinstalled inside container)
+node_modules/
+.pnpm-store/
+
+# Build output (rebuilt inside container)
+dist/
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Local environment files (NEVER include in image)
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test files and coverage
+**/*.test.ts
+**/*.spec.ts
+coverage/
+.nyc_output/
+
+# Development tooling
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Documentation (not needed at runtime)
+*.md
+!README.md
+
+# Vercel deployment artifacts
+.vercel/
+vercel.json
+api/
+
+# Temporary files
+tmp/
+temp/

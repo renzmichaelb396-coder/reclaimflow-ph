@@ -1,0 +1,85 @@
+# =============================================================================
+# ReclaimFlow PH — Docker Compose
+# Hybrid Deployment: On-Prem | Kubernetes | AWS GovCloud | Azure Government
+# =============================================================================
+# Usage:
+#   1. Copy .env.example to .env and fill in all required values.
+#   2. docker compose up -d
+#   3. To run migrations: docker compose exec app pnpm db:push
+# =============================================================================
+
+version: "3.9"
+
+services:
+  app:
+    image: reclaimflow-ph:latest
+    # Build locally if image is not pre-built:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Build-time frontend env vars (baked into the Vite bundle)
+        VITE_APP_ID: ${VITE_APP_ID}
+        VITE_OAUTH_PORTAL_URL: ${VITE_OAUTH_PORTAL_URL}
+        VITE_FRONTEND_FORGE_API_URL: ${VITE_FRONTEND_FORGE_API_URL:-}
+        VITE_FRONTEND_FORGE_API_KEY: ${VITE_FRONTEND_FORGE_API_KEY:-}
+    container_name: reclaimflow-app
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    environment:
+      # ── Runtime: Node ──────────────────────────────────────────────────────
+      NODE_ENV: production
+      PORT: 3000
+
+      # ── Database (Supabase / MySQL-compatible) ─────────────────────────────
+      # Format: mysql://user:password@host:3306/dbname
+      DATABASE_URL: ${DATABASE_URL}
+
+      # ── Authentication ─────────────────────────────────────────────────────
+      JWT_SECRET: ${JWT_SECRET}
+      OAUTH_SERVER_URL: ${OAUTH_SERVER_URL}
+      VITE_APP_ID: ${VITE_APP_ID}
+      OWNER_OPEN_ID: ${OWNER_OPEN_ID}
+
+      # ── Supabase Storage ───────────────────────────────────────────────────
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+
+      # ── AI / Forge API (optional) ──────────────────────────────────────────
+      BUILT_IN_FORGE_API_URL: ${BUILT_IN_FORGE_API_URL:-}
+      BUILT_IN_FORGE_API_KEY: ${BUILT_IN_FORGE_API_KEY:-}
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    # Resource limits — tune for target government infrastructure
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    # Mount a local volume for persistent uploaded file cache (optional)
+    # volumes:
+    #   - ./uploads:/app/uploads
+
+# =============================================================================
+# NOTE: This application uses Supabase as its external database and storage
+# provider. No local database container is required. For fully air-gapped
+# government deployments, replace Supabase with a self-hosted PostgreSQL +
+# MinIO stack and update DATABASE_URL and SUPABASE_* vars accordingly.
+# =============================================================================

@@ -12,6 +12,7 @@ import { startSlaCron } from "../slaCron";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { getDb } from "../db";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -48,6 +49,38 @@ async function startServer() {
   registerUploadRoutes(app);
   // Board Resolution PDF generation routes
   registerPdfRoutes(app);
+  // ── Health check endpoint (used by Docker, Kubernetes, and load balancers) ──
+  app.get("/health", async (_req, res) => {
+    const status: {
+      status: string;
+      uptime: number;
+      timestamp: string;
+      db: string;
+    } = {
+      status: "ok",
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+      db: "unchecked",
+    };
+
+    try {
+      const db = await getDb();
+      if (db) {
+        // Lightweight ping: SELECT 1
+        await db.execute("SELECT 1" as any);
+        status.db = "connected";
+      } else {
+        status.db = "unavailable";
+      }
+    } catch {
+      status.db = "error";
+      status.status = "degraded";
+    }
+
+    const httpStatus = status.status === "ok" ? 200 : 503;
+    res.status(httpStatus).json(status);
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",
