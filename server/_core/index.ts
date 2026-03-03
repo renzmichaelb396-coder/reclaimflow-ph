@@ -8,7 +8,7 @@ import { registerChatRoutes } from "./chat";
 import { registerDebugRoutes } from "./debug";
 import { registerUploadRoutes } from "../uploadRoutes";
 import { registerPdfRoutes } from "../pdfRoutes";
-import { startSlaCron } from "../slaCron";
+import { startSlaCron, getSlaCronStatus } from "../slaCron";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -49,36 +49,120 @@ async function startServer() {
   registerUploadRoutes(app);
   // Board Resolution PDF generation routes
   registerPdfRoutes(app);
-  // ── Health check endpoint (used by Docker, Kubernetes, and load balancers) ──
+
+  // ── Deep Health Check Endpoint ─────────────────────────────────────────────
+  // Used by Docker HEALTHCHECK, Kubernetes liveness/readiness probes,
+  // load balancers, and government infrastructure monitoring systems.
+  //
+  // Checks performed:
+  //   1. Server uptime (always available)
+  //   2. Database connectivity (SELECT 1 ping)
+  //   3. Migration table existence (__drizzle_migrations for MySQL dialect)
+  //   4. SLA cron liveness (last tick timestamp + scheduled status)
+  //
+  // Response codes:
+  //   200 — all checks pass (status: "ok")
+  //   503 — one or more checks fail (status: "degraded")
+  //
+  // NOTE: This endpoint intentionally does NOT expose secret values,
+  // connection strings, or internal error messages in the response body.
   app.get("/health", async (_req, res) => {
-    const status: {
-      status: string;
+    type CheckStatus = "ok" | "degraded" | "unavailable" | "unchecked";
+
+    const health: {
+      status: "ok" | "degraded";
       uptime: number;
       timestamp: string;
-      db: string;
+      checks: {
+        db: CheckStatus;
+        migrations: CheckStatus;
+        slaCron: CheckStatus;
+        slaCronLastTick: string | null;
+      };
     } = {
       status: "ok",
-      uptime: process.uptime(),
+      uptime: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
-      db: "unchecked",
+      checks: {
+        db: "unchecked",
+        migrations: "unchecked",
+        slaCron: "unchecked",
+        slaCronLastTick: null,
+      },
     };
 
+    // ── Check 1: Database connectivity ──────────────────────────────────────
     try {
       const db = await getDb();
       if (db) {
-        // Lightweight ping: SELECT 1
         await db.execute("SELECT 1" as any);
-        status.db = "connected";
+        health.checks.db = "ok";
       } else {
-        status.db = "unavailable";
+        health.checks.db = "unavailable";
+        health.status = "degraded";
       }
     } catch {
-      status.db = "error";
-      status.status = "degraded";
+      health.checks.db = "degraded";
+      health.status = "degraded";
     }
 
-    const httpStatus = status.status === "ok" ? 200 : 503;
-    res.status(httpStatus).json(status);
+    // ── Check 2: Migration table existence ──────────────────────────────────
+    // Drizzle Kit (MySQL dialect) creates `__drizzle_migrations` to track
+    // applied migrations. Its presence confirms migrations have been run.
+    if (health.checks.db === "ok") {
+      try {
+        const db = await getDb();
+        if (db) {
+          // SHOW TABLES LIKE is a lightweight, read-only check
+          const result = await db.execute(
+            "SHOW TABLES LIKE '__drizzle_migrations'" as any
+          ) as any;
+          const rows = Array.isArray(result) ? result[0] : result;
+          health.checks.migrations =
+            Array.isArray(rows) && rows.length > 0 ? "ok" : "degraded";
+          if (health.checks.migrations === "degraded") {
+            health.status = "degraded";
+          }
+        }
+      } catch {
+        health.checks.migrations = "degraded";
+        health.status = "degraded";
+      }
+    } else {
+      health.checks.migrations = "unavailable";
+    }
+
+    // ── Check 3: SLA Cron liveness ──────────────────────────────────────────
+    // Verifies the SLA cron is scheduled and has run within the expected
+    // window (last tick must be within 2x the 6-hour interval = 12 hours).
+    try {
+      const cronStatus = getSlaCronStatus();
+      health.checks.slaCronLastTick = cronStatus.lastTickAt
+        ? cronStatus.lastTickAt.toISOString()
+        : null;
+
+      if (!cronStatus.isScheduled) {
+        health.checks.slaCron = "degraded";
+        health.status = "degraded";
+      } else if (cronStatus.lastTickAt) {
+        const twelveHoursMs = 12 * 60 * 60 * 1000;
+        const timeSinceLastTick = Date.now() - cronStatus.lastTickAt.getTime();
+        health.checks.slaCron =
+          timeSinceLastTick <= twelveHoursMs ? "ok" : "degraded";
+        if (health.checks.slaCron === "degraded") {
+          health.status = "degraded";
+        }
+      } else {
+        // Cron is scheduled but has not yet run (within startup window)
+        health.checks.slaCron = "ok";
+      }
+    } catch {
+      health.checks.slaCron = "degraded";
+      health.status = "degraded";
+    }
+
+    const httpStatus = health.status === "ok" ? 200 : 503;
+    res.status(httpStatus).json(health);
   });
 
   // tRPC API

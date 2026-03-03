@@ -32,6 +32,12 @@ const SYSTEM_USER_ID = 1;
 let cronHandle: ReturnType<typeof setInterval> | null = null;
 let isRunning = false;
 
+// ── Liveness tracking ────────────────────────────────────────────────────────
+// lastTickAt is updated after every successful tick completion.
+// Used by the /health endpoint to verify the cron is not silently stalled.
+let lastTickAt: Date | null = null;
+let isScheduled = false;
+
 /**
  * Execute one SLA enforcement tick.
  * Safe to call concurrently — guarded by `isRunning` flag.
@@ -220,8 +226,8 @@ export async function runSlaCronTick(): Promise<{
     console.error("[SLA Cron] Fatal tick error:", err);
   } finally {
     isRunning = false;
+    lastTickAt = new Date();
   }
-
   return stats;
 }
 
@@ -237,6 +243,7 @@ export function startSlaCron(): void {
   }
 
   console.log(`[SLA Cron] Starting — interval: ${SLA_CRON_INTERVAL_MS / 1000 / 60 / 60}h`);
+  isScheduled = true;
 
   // Run immediately on startup (after a short delay to let DB connect)
   setTimeout(() => {
@@ -259,6 +266,23 @@ export function stopSlaCron(): void {
   if (cronHandle) {
     clearInterval(cronHandle);
     cronHandle = null;
+    isScheduled = false;
     console.log("[SLA Cron] Stopped");
   }
+}
+
+/**
+ * Return the current liveness status of the SLA cron.
+ * Used by the /health endpoint to report cron health to container orchestrators.
+ */
+export function getSlaCronStatus(): {
+  isScheduled: boolean;
+  isRunning: boolean;
+  lastTickAt: Date | null;
+} {
+  return {
+    isScheduled,
+    isRunning,
+    lastTickAt,
+  };
 }
